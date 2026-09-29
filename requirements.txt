@@ -1,0 +1,11 @@
+langgraph>=1.0
+langchain>=1.0
+langchain-google-genai
+langchain-anthropic
+fastapi
+uvicorn[standard]
+httpx
+pydantic>=2
+pydantic-settings
+pytest
+langchain-openai
