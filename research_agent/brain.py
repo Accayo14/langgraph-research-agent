@@ -1,34 +1,48 @@
 import logging
-from typing import Protocol
+from typing import Protocol, Sequence
 
-from .schemas import Critique, Plan, Source
+from .schemas import Critique, Draft, Plan, Source, Turn
 
 log = logging.getLogger(__name__)
 
 
 class Brain(Protocol):
-    async def plan(self, question: str) -> Plan: ...
+    async def plan(self, question: str, history: Sequence[Turn] = ()) -> Plan: ...
 
     async def write(
-        self, question: str, sources: list[Source], previous_draft: str | None, feedback: str | None
-    ) -> str: ...
+        self,
+        question: str,
+        sources: list[Source],
+        previous_draft: str | None,
+        feedback: str | None,
+        history: Sequence[Turn] = (),
+    ) -> Draft: ...
 
     async def critique(self, question: str, draft: str, sources: list[Source]) -> Critique: ...
 
 
-def _format_sources(sources: list[Source]) -> str:
+def format_sources(sources: list[Source]) -> str:
     return "\n\n".join(f"[{i}] {s.title} ({s.url})\n{s.snippet}" for i, s in enumerate(sources, 1))
 
 
-PLAN_PROMPT = """You are a research planner. Break the user's question into 1-4 short Wikipedia
+def format_history(history: Sequence[Turn]) -> str:
+    if not history:
+        return ""
+    turns = "\n\n".join(f"Q: {t.question}\nA: {t.answer[:600]}" for t in history[-3:])
+    return f"Conversation so far (use it to resolve references like 'he' or 'it'):\n{turns}\n\n"
+
+
+PLAN_PROMPT = """{history}You are a research planner. Break the user's question into 1-4 short Wikipedia
 search queries (article-title style, e.g. "CRISPR gene editing") that together gather the facts needed.
+If the question involves several people, places or things, use one query per entity.
 
 Question: {question}"""
 
-WRITE_PROMPT = """Answer the question using ONLY the numbered sources below. Cite sources inline
+WRITE_PROMPT = """{history}Answer the question using ONLY the numbered sources below. Cite sources inline
 using plain square-bracket numbers like [1] or [2] (no other citation format). Ignore sources that are
-irrelevant to the question. If the sources do not contain something, say so rather than guessing. Be concise
-(150-300 words).
+irrelevant to the question. If the sources do not contain the answer, say so rather than guessing.
+Keep the answer concise (80-250 words). Also give short_answer: the direct answer in as few words as
+possible (e.g. "yes", a name, a date), without citations.
 
 Question: {question}
 
@@ -40,7 +54,7 @@ REVISION_BLOCK = """
 Your previous draft:
 {draft}
 
-A reviewer gave this feedback. Rewrite the answer to address it:
+Fix these problems in your rewrite:
 {feedback}"""
 
 CRITIQUE_PROMPT = """You are a strict reviewer. Judge the draft answer against the sources.
@@ -65,11 +79,11 @@ class LLMBrain:
             raise ValueError("at least one model is required")
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
         self.model_names = models
-        llms = [init_chat_model(m, temperature=0, **kwargs) for m in models]
+        llms = list(zip([init_chat_model(m, temperature=0, **kwargs) for m in models], models))
 
-        self._llm = self._chain([self._tagged(m, name) for m, name in zip(llms, models)])
-        self._planner = self._chain([self._structured(m, name, Plan) for m, name in zip(llms, models)])
-        self._critic = self._chain([self._structured(m, name, Critique) for m, name in zip(llms, models)])
+        self._planner = self._chain([self._structured(m, name, Plan) for m, name in llms])
+        self._writer = self._chain([self._structured(m, name, Draft) for m, name in llms])
+        self._critic = self._chain([self._structured(m, name, Critique) for m, name in llms])
 
     @staticmethod
     def _chain(runnables):
@@ -77,28 +91,18 @@ class LLMBrain:
         return primary.with_fallbacks(rest) if rest else primary
 
     @staticmethod
-    def _tagged(llm, name: str):
-        from langchain_core.runnables import RunnableLambda
-
-        def check(msg):
-            text = msg.text if isinstance(getattr(msg, "text", None), str) else str(msg.content)
-            if not text.strip():
-                raise ValueError(f"{name} returned an empty response")
-            log.info("answered by %s", name)
-            return text
-
-        return llm | RunnableLambda(check)
-
-    @staticmethod
     def _structured(llm, name: str, schema):
         from langchain_core.runnables import RunnableLambda
 
         def check(out: dict):
-            if out.get("parsed") is None:
+            parsed = out.get("parsed")
+            if parsed is None:
                 # raise so with_fallbacks moves to next model
                 raise ValueError(f"{name} returned invalid {schema.__name__}: {out.get('parsing_error')}")
+            if isinstance(parsed, Draft) and not parsed.answer.strip():
+                raise ValueError(f"{name} returned an empty answer")
             log.info("%s produced by %s", schema.__name__, name)
-            return out["parsed"]
+            return parsed
 
         return llm.with_structured_output(schema, include_raw=True) | RunnableLambda(check)
 
@@ -111,18 +115,25 @@ class LLMBrain:
             max_retries=settings.llm_max_retries,
         )
 
-    async def plan(self, question: str) -> Plan:
-        return await self._planner.ainvoke(PLAN_PROMPT.format(question=question))
+    async def plan(self, question, history=()) -> Plan:
+        return await self._planner.ainvoke(
+            PLAN_PROMPT.format(question=question, history=format_history(history))
+        )
 
-    async def write(self, question, sources, previous_draft, feedback) -> str:
+    async def write(self, question, sources, previous_draft, feedback, history=()) -> Draft:
         revision = (
             REVISION_BLOCK.format(draft=previous_draft, feedback=feedback) if previous_draft and feedback else ""
         )
-        return await self._llm.ainvoke(
-            WRITE_PROMPT.format(question=question, sources=_format_sources(sources), revision=revision)
+        return await self._writer.ainvoke(
+            WRITE_PROMPT.format(
+                question=question,
+                sources=format_sources(sources),
+                revision=revision,
+                history=format_history(history),
+            )
         )
 
     async def critique(self, question, draft, sources) -> Critique:
         return await self._critic.ainvoke(
-            CRITIQUE_PROMPT.format(question=question, sources=_format_sources(sources), draft=draft)
+            CRITIQUE_PROMPT.format(question=question, sources=format_sources(sources), draft=draft)
         )

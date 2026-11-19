@@ -15,8 +15,17 @@ class Settings(BaseSettings):
     auto_discover_free_models: bool = False
     max_fallback_models: int = Field(default=5, ge=0)
     llm_max_retries: int = Field(default=1, ge=0)
+    node_retry_attempts: int = Field(default=3, ge=1)
 
-    request_timeout_s: float = Field(default=120.0, gt=0)
+    pages_per_query: int = Field(default=3, ge=1, le=10)
+    top_k: int = Field(default=8, ge=1, le=30)
+
+    cache_enabled: bool = True
+    cache_path: str = ".data/cache.sqlite"
+    # empty = keep conversation memory in RAM only
+    checkpoint_path: str | None = ".data/checkpoints.sqlite"
+
+    request_timeout_s: float = Field(default=180.0, gt=0)
     recursion_limit: int = Field(default=40, ge=10)
 
     def model_chain(self) -> list[str]:

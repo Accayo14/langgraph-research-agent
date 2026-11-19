@@ -1,0 +1,32 @@
+[
+  {
+    "variant": "baseline",
+    "n": 6,
+    "errors": 0,
+    "exact_match": 0.0,
+    "f1": 0.0,
+    "answer_in_text": 0.0,
+    "support_recall": 0.0,
+    "citations_valid": 0.6666666666666666,
+    "avg_iterations": 1,
+    "avg_llm_calls": 1,
+    "avg_tokens": 1439.1666666666667,
+    "median_latency_s": 18.35,
+    "failed_calls_recovered": 4
+  },
+  {
+    "variant": "agent",
+    "n": 6,
+    "errors": 0,
+    "exact_match": 0.6666666666666666,
+    "f1": 0.6666666666666666,
+    "answer_in_text": 0.8333333333333334,
+    "support_recall": 0.8333333333333334,
+    "citations_valid": 1,
+    "avg_iterations": 1.5,
+    "avg_llm_calls": 3.1666666666666665,
+    "avg_tokens": 6780.333333333333,
+    "median_latency_s": 54.235,
+    "failed_calls_recovered": 10
+  }
+]

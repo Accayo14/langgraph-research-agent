@@ -1,0 +1,68 @@
+[
+  {
+    "id": "5ae143ed55429920d5234360",
+    "question": "In what year was the university where Sergei Aleksandrovich Tokarev was a professor founded?",
+    "answer": "1755",
+    "type": "bridge",
+    "level": "hard",
+    "supporting_titles": [
+      "Moscow State University",
+      "Sergei Aleksandrovich Tokarev"
+    ]
+  },
+  {
+    "id": "5abc19705542993a06baf86e",
+    "question": "Black Book starred the actress and writer of what heritage?",
+    "answer": "Dutch",
+    "type": "bridge",
+    "level": "hard",
+    "supporting_titles": [
+      "Black Book (film)",
+      "Halina Reijn"
+    ]
+  },
+  {
+    "id": "5ac3e0f7554299194317388b",
+    "question": "Which actor does American Beauty and American Beauty have in common?",
+    "answer": "Kevin Spacey",
+    "type": "bridge",
+    "level": "hard",
+    "supporting_titles": [
+      "American Beauty (1999 film)",
+      "American Beauty (soundtrack)"
+    ]
+  },
+  {
+    "id": "5ab985eb554299131ca42360",
+    "question": "Between Greyia and Calibanus, which genus contains more species?",
+    "answer": "Greyia",
+    "type": "comparison",
+    "level": "hard",
+    "supporting_titles": [
+      "Calibanus",
+      "Greyia"
+    ]
+  },
+  {
+    "id": "5a8753d95542994846c1cd63",
+    "question": "Did John Updike and Tom Clancy both publish more than 15 bestselling novels?",
+    "answer": "yes",
+    "type": "comparison",
+    "level": "hard",
+    "supporting_titles": [
+      "John Updike",
+      "Tom Clancy"
+    ]
+  },
+  {
+    "id": "5a7b1023554299042af8f6c2",
+    "question": " Which movie did Disney produce first,  The Many Adventures of Winnie the Pooh or Ride a Wild Pony?",
+    "answer": "Ride a Wild Pony",
+    "type": "comparison",
+    "level": "hard",
+    "supporting_titles": [
+      "Ride a Wild Pony",
+      "The Many Adventures of Winnie the Pooh"
+    ]
+  }
+]

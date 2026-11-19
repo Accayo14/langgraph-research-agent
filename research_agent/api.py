@@ -1,84 +1,67 @@
 import asyncio
 import json
-import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from .brain import Brain, LLMBrain
 from .config import Settings
-from .graph import build_graph
-from .schemas import ResearchRequest, ResearchResponse
-from .search import Searcher, WikipediaSearcher, make_http_client
+from .metrics import RunMetrics
+from .runner import initial_state, new_thread_id, open_agent, run_config, stream_run, to_response
+from .schemas import ResearchRequest, ResearchResponse, ThreadHistory
 
 
-def _initial_state(req: ResearchRequest) -> dict:
-    return {"question": req.question, "max_iterations": req.max_iterations}
-
-
-def _run_config(settings: Settings) -> dict:
-    return {"recursion_limit": settings.recursion_limit, "configurable": {"thread_id": str(uuid.uuid4())}}
-
-
-def to_response(state: dict) -> ResearchResponse:
-    critique = state.get("critique")
-    return ResearchResponse(
-        answer=state.get("draft", ""),
-        sources=state.get("sources", []),
-        iterations=state.get("iteration", 0),
-        score=critique.score if critique else None,
-        stop_reason=state["stop_reason"],
-        trace=state.get("trace", []),
-    )
-
-
-def create_app(brain: Brain | None = None, searcher: Searcher | None = None, settings: Settings | None = None):
+def create_app(brain=None, searcher=None, settings: Settings | None = None, checkpointer=None):
     settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        client = None
-        s = searcher
-        if s is None:
-            client = make_http_client()
-            s = WikipediaSearcher(client)
-        app.state.graph = build_graph(brain or LLMBrain.from_settings(settings), s)
-        yield
-        if client:
-            await client.aclose()
+        async with open_agent(settings, brain=brain, searcher=searcher, checkpointer=checkpointer) as agent:
+            app.state.agent = agent
+            yield
 
-    app = FastAPI(title="LangGraph Research Agent", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="LangGraph Research Agent", version="0.2.0", lifespan=lifespan)
+
+    def _start(req: ResearchRequest):
+        thread_id = req.thread_id or new_thread_id()
+        metrics = RunMetrics()
+        return thread_id, metrics, run_config(thread_id, metrics, settings.recursion_limit)
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "model": settings.model}
+        return {"status": "ok", "models": settings.model_chain()}
 
     @app.post("/research", response_model=ResearchResponse)
     async def research(req: ResearchRequest, request: Request):
-        graph = request.app.state.graph
+        graph = request.app.state.agent.graph
+        thread_id, metrics, config = _start(req)
         try:
             async with asyncio.timeout(settings.request_timeout_s):
-                final = await graph.ainvoke(_initial_state(req), _run_config(settings))
+                final = await graph.ainvoke(initial_state(req.question, req.max_iterations), config)
         except TimeoutError:
             raise HTTPException(status_code=504, detail="Research timed out")
-        return to_response(final)
+        return to_response(final, thread_id, metrics)
 
     @app.post("/research/stream")
     async def research_stream(req: ResearchRequest, request: Request):
-        # SSE stream
-        graph = request.app.state.graph
+        graph = request.app.state.agent.graph
+        thread_id, metrics, config = _start(req)
 
         async def events():
-            state: dict = {}
-            async for chunk in graph.astream(_initial_state(req), _run_config(settings), stream_mode="values"):
-                prev_len = len(state.get("trace", []))
-                state = chunk
-                for line in state.get("trace", [])[prev_len:]:
-                    yield f"event: step\ndata: {json.dumps(line)}\n\n"
-            yield f"event: result\ndata: {to_response(state).model_dump_json()}\n\n"
+            async for kind, payload in stream_run(graph, initial_state(req.question, req.max_iterations), config):
+                if kind == "step":
+                    yield f"event: step\ndata: {json.dumps(payload)}\n\n"
+                else:
+                    yield f"event: result\ndata: {to_response(payload, thread_id, metrics).model_dump_json()}\n\n"
 
         return StreamingResponse(events(), media_type="text/event-stream")
+
+    @app.get("/threads/{thread_id}", response_model=ThreadHistory)
+    async def thread_history(thread_id: str, request: Request):
+        snapshot = await request.app.state.agent.graph.aget_state({"configurable": {"thread_id": thread_id}})
+        if not snapshot.values:
+            raise HTTPException(status_code=404, detail="Unknown thread")
+        return ThreadHistory(thread_id=thread_id, turns=snapshot.values.get("history", []))
 
     return app
 

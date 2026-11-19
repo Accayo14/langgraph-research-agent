@@ -9,3 +9,6 @@ pydantic>=2
 pydantic-settings
 pytest
 langchain-openai
+langgraph-checkpoint-sqlite
+aiosqlite
+pytest-cov
